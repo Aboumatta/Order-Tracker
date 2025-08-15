@@ -10,10 +10,17 @@
   <style>
     body { font-family: sans-serif; background: #fff3f3; padding: 20px; max-width: 900px; margin: auto; }
     h2, h3 { color: #D7282F; margin-bottom: 8px; }
-    input, select, button { padding: 10px; margin-top: 5px; font-size: 1em; border-radius: 6px; border: 1px solid #ccc; }
+    input, select, button {
+      padding: 10px; margin-top: 5px; font-size: 1em;
+      border-radius: 6px; border: 1px solid #ccc;
+    }
     button { background-color: #D7282F; color: white; border: none; cursor: pointer; }
     button:hover { opacity: 0.9; }
-    .item { background: #fff; padding: 10px; margin: 10px 0; border-left: 5px solid #D7282F; border-radius: 4px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .item {
+      background: #fff; padding: 10px; margin: 10px 0;
+      border-left: 5px solid #D7282F; border-radius: 4px;
+      display: flex; justify-content: space-between; align-items: flex-start;
+    }
     .item-content { flex: 1; }
     .export-btn { background: #2a9d8f; color: #fff; margin-bottom: 5px; }
     .delete-btn { background: #888; color: white; }
@@ -92,8 +99,8 @@
     <button onclick="loadBackfill()">Load Missing Entries</button>
     <div id="backfillList"></div>
 
-    <h3>One-Click Backfill for All Old Entries</h3>
-    <button onclick="backfillAllOldEntries()">Backfill All Missing Data</button>
+    <!-- Interactive Backfill All Missing Data -->
+    <button style="background:#D7282F; margin-top:10px;" onclick="backfillAllMissing()">Backfill All Missing Data</button>
 
     <h3>All Tracking Entries</h3>
     <div id="entries"></div>
@@ -161,6 +168,8 @@ async function saveCore({ print = false } = {}) {
 
   await docRef.set({ parcelName: name, barangay, price, location, estimatedDate, statusHistory, timestamp: now });
 
+  if (print) { /* printing code here */ }
+
   ["trackNumber","parcelName","barangay","price","trackStatus","trackLocation","estimatedDate"].forEach(id => document.getElementById(id).value = "");
   loadAllEntries();
   return true;
@@ -208,18 +217,13 @@ function prevPage() { if (currentPage > 1) currentPage--; renderEntries(); }
 
 function exportExcelByDateRange() {
   const from = new Date(document.getElementById("exportFrom").value);
-  const to = new Date(document.getElementById("exportTo").value); to.setHours(23, 59, 59, 999);
+  const to = new Date(document.getElementById("exportTo").value);
+  to.setHours(23, 59, 59, 999);
   const filtered = allEntries.filter(e => e.timestamp && e.timestamp >= from && e.timestamp <= to);
   if (!filtered.length) { alert("No entries found in that date range"); return; }
-
-  const data = filtered.map(e => ({
-    TrackingNumber: e.id,
-    ParcelName: e.parcelName || 'Unknown',
-    Barangay: e.barangay || 'Unknown',
-    Price: e.price || 0
-  }));
-
-  const ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
+  const data = filtered.map(e => ({ TrackingNumber: e.id, ParcelName: e.parcelName || '', Barangay: e.barangay || '', Price: e.price || '' }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tracking Data");
   XLSX.writeFile(wb, `tracking_export_${filtered.length}_items.xlsx`);
 }
@@ -227,8 +231,9 @@ function exportExcelByDateRange() {
 function exportSingleToExcel(id) {
   const e = allEntries.find(x => x.id === id);
   if (!e) return alert("Entry not found");
-  const data = [{ TrackingNumber: e.id, ParcelName: e.parcelName || 'Unknown', Barangay: e.barangay || 'Unknown', Price: e.price || 0 }];
-  const ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
+  const data = [{ TrackingNumber: e.id, ParcelName: e.parcelName || '', Barangay: e.barangay || '', Price: e.price || '' }];
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tracking Entry");
   XLSX.writeFile(wb, `tracking_${id}.xlsx`);
 }
@@ -283,34 +288,30 @@ async function saveBackfill(id) {
   loadAllEntries();
 }
 
-// One-Click Backfill for All Old Entries
-async function backfillAllOldEntries() {
-  if (!confirm("This will update all old entries missing Parcel Name, Barangay, or Price. Continue?")) return;
+// New Interactive Backfill for All Missing Entries
+async function backfillAllMissing() {
   const snap = await db.collection("tracking").get();
-  let updatedCount = 0;
-  const batch = db.batch();
-
-  snap.docs.forEach(doc => {
-    const data = doc.data();
-    let updated = false;
-    const parcelName = data.parcelName || "Unknown";
-    const barangay = data.barangay || "Unknown";
-    const price = data.price || 0;
-
-    if (!data.parcelName || !data.barangay || !data.price) {
-      updated = true;
-      batch.update(doc.ref, { parcelName, barangay, price });
-      updatedCount++;
-    }
+  const missingEntries = snap.docs.filter(doc => {
+    const d = doc.data();
+    return !d.parcelName || !d.barangay || !d.price;
   });
 
-  if (updatedCount === 0) {
-    alert("No missing data found. All entries are already complete.");
+  if (!missingEntries.length) {
+    alert("No missing data to backfill.");
     return;
   }
 
-  await batch.commit();
-  alert(`Backfill complete. Updated ${updatedCount} entries.`);
+  for (const doc of missingEntries) {
+    const d = doc.data();
+    const parcelName = prompt(`Tracking ${doc.id} - Enter Parcel Name:`, d.parcelName || "");
+    const barangay = prompt(`Tracking ${doc.id} - Enter Barangay:`, d.barangay || "");
+    const priceStr = prompt(`Tracking ${doc.id} - Enter Price:`, d.price || "0");
+    const price = parseFloat(priceStr) || 0;
+
+    await db.collection("tracking").doc(doc.id).update({ parcelName, barangay, price });
+  }
+
+  alert("All missing data updated!");
   loadAllEntries();
 }
 </script>
