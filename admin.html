@@ -5,11 +5,10 @@
   <title>Admin Panel - JNK Express</title>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Roboto', sans-serif; background: #fff3f3; padding: 20px; max-width: 800px; margin: auto; }
+    body { font-family: sans-serif; background: #fff3f3; padding: 20px; max-width: 800px; margin: auto; }
     h2 { color: #D7282F; }
     input, select, button {
       width: 100%; padding: 12px; margin-top: 10px;
@@ -29,23 +28,26 @@
     .pagination { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
     .timeline { margin-top: 5px; padding-left: 10px; font-size: 0.95em; color: #333; }
     .top-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+    #receiptArea { display: none; }
   </style>
 </head>
 <body>
   <h2>JNK Admin Panel</h2>
-  <input type="text" id="username" placeholder="Username" />
-  <input type="password" id="password" placeholder="Password" />
-  <button onclick="login()">Login</button>
-  <p id="loginMessage" style="color:red;"></p>
+  
+  <div id="loginSection">
+    <input type="text" id="username" placeholder="Username" />
+    <input type="password" id="password" placeholder="Password" />
+    <button onclick="login()">Login</button>
+    <p id="loginMessage" style="color:red;"></p>
+  </div>
 
   <div id="adminSection" style="display:none;">
-    <input type="text" id="trackNumber" placeholder="Tracking Number" />
-    <button onclick="startScanner()">📷 Scan</button>
-    <div id="scannerContainer" style="display:none">
-      <div id="scanner" style="width:100%"></div>
-      <button onclick="stopScanner()">❌ Cancel</button>
-    </div>
+    <button onclick="logout()">🚪 Logout</button>
 
+    <input type="text" id="trackNumber" placeholder="Tracking Number" />
+    <input type="text" id="parcelName" placeholder="Parcel Name" />
+    <input type="text" id="barangay" placeholder="Barangay" />
+    <input type="number" id="price" placeholder="Price (PHP)" />
     <select id="trackStatus">
       <option value="">Select Status</option>
       <option>Package Received</option>
@@ -56,22 +58,30 @@
     <input type="text" id="trackLocation" placeholder="Location (e.g., Manila Hub)" />
     <input type="date" id="estimatedDate" />
     <button onclick="saveTracking()">Add / Update</button>
+    <button onclick="printAndSave()">🖨️ Print Receipt</button>
+
+    <button onclick="startScanner()">📷 Scan</button>
+    <div id="scannerContainer" style="display:none">
+      <div id="scanner" style="width:100%"></div>
+      <button onclick="stopScanner()">❌ Cancel</button>
+    </div>
 
     <div class="top-bar">
       <input type="text" id="searchInput" placeholder="Search tracking number..." />
-<button onclick="renderEntries()">🔍 Search</button>
+      <button onclick="renderEntries()">🔍 Search</button>
     </div>
 
     <div class="top-bar">
-      <input type="date" id="exportFrom" />
-      <input type="date" id="exportTo" />
-      <button onclick="exportCSVByDateRange()">Export CSV by Date</button>
+      <input type="date" id="excelFrom" />
+      <input type="date" id="excelTo" />
+      <button onclick="exportExcelByDateRange()">📊 Export Excel by Date</button>
     </div>
 
     <div class="top-bar">
-      <input type="date" id="bulkDate" />
-      <input type="time" id="startTime" />
-      <input type="time" id="endTime" />
+      <input type="date" id="bulkFromDate" />
+      <input type="time" id="bulkFromTime" />
+      <input type="date" id="bulkToDate" />
+      <input type="time" id="bulkToTime" />
       <select id="bulkStatus">
         <option value="">Update Status to...</option>
         <option>Package Received</option>
@@ -91,229 +101,259 @@
     </div>
   </div>
 
+  <div id="receiptArea">
+    <div id="receiptContent" style="font-family:monospace; font-size:10pt;"></div>
+  </div>
+
 <script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyAnrNfuTSRAKUS2tAU4AUUrauw_QzszCjY",
-    authDomain: "jnk-ordertracker.firebaseapp.com",
-    projectId: "jnk-ordertracker",
-    storageBucket: "jnk-ordertracker.appspot.com",
-    messagingSenderId: "421193030070",
-    appId: "1:421193030070:web:078e39980237bc41f64917"
-  };
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
+const firebaseConfig = {
+  apiKey: "AIzaSyAnrNfuTSRAKUS2tAU4AUUrauw_QzszCjY",
+  authDomain: "jnk-ordertracker.firebaseapp.com",
+  projectId: "jnk-ordertracker",
+  storageBucket: "jnk-ordertracker.appspot.com",
+  messagingSenderId: "421193030070",
+  appId: "1:421193030070:web:078e39980237bc41f64917"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-  const USERNAME = "JNK";
-  const PASSWORD = "11223344$";
-  let allEntries = [];
-  let currentPage = 1;
-  const pageSize = 10;
+const USERNAME = "JNK";
+const PASSWORD = "11223344$";
+let allEntries = [];
+let currentPage = 1;
+const pageSize = 10;
 
-  function login() {
-    const user = document.getElementById("username").value;
-    const pass = document.getElementById("password").value;
-    if (user === USERNAME && pass === PASSWORD) {
-      document.getElementById("adminSection").style.display = "block";
-      document.getElementById("loginMessage").innerText = "";
-      loadAllEntries();
-    } else {
-      document.getElementById("loginMessage").innerText = "Invalid login.";
-    }
-  }
-
-  let scanner;
-  function startScanner() {
-    const container = document.getElementById("scannerContainer");
-    container.style.display = "block";
-    scanner = new Html5Qrcode("scanner");
-    scanner.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: 250 },
-      (decodedText) => {
-        document.getElementById("trackNumber").value = decodedText.trim();
-        stopScanner();
-      },
-      () => {}
-    );
-  }
-  function stopScanner() {
-    const container = document.getElementById("scannerContainer");
-    container.style.display = "none";
-    if (scanner) scanner.stop().then(() => scanner.clear()).catch(() => {});
-  }
-
-  async function saveTracking() {
-    const number = document.getElementById("trackNumber").value.trim().toUpperCase();
-    const status = document.getElementById("trackStatus").value;
-    const location = document.getElementById("trackLocation").value.trim();
-    const estimatedDate = document.getElementById("estimatedDate").value;
-    if (!number || !status) return alert("Please enter tracking number and status.");
-
-    const docRef = db.collection("tracking").doc(number);
-    const docSnap = await docRef.get();
-    const now = firebase.firestore.Timestamp.now();
-
-    let statusHistory = docSnap.exists ? docSnap.data().statusHistory || [] : [];
-    statusHistory.push({ status, timestamp: now });
-
-    if (docSnap.exists) {
-      await docRef.update({
-        location,
-        estimatedDate,
-        statusHistory
-      });
-    } else {
-      await docRef.set({
-        location,
-        estimatedDate,
-        statusHistory,
-        timestamp: now
-      });
-    }
-
-    alert("✅ Tracking info saved.");
-    ["trackNumber", "trackStatus", "trackLocation", "estimatedDate"].forEach(id => document.getElementById(id).value = "");
+function login() {
+  const user = document.getElementById("username").value;
+  const pass = document.getElementById("password").value;
+  if (user === USERNAME && pass === PASSWORD) {
+    document.getElementById("loginSection").style.display = "none";
+    document.getElementById("adminSection").style.display = "block";
     loadAllEntries();
+  } else {
+    document.getElementById("loginMessage").innerText = "Invalid login.";
   }
+}
 
-  async function deleteEntry(id) {
-    const confirmPass = prompt("Enter admin password to delete:");
-    if (confirmPass !== PASSWORD) return alert("❌ Incorrect password.");
-    await db.collection("tracking").doc(id).delete();
-    alert("Deleted.");
-    loadAllEntries();
-  }
+function logout() {
+  document.getElementById("loginSection").style.display = "block";
+  document.getElementById("adminSection").style.display = "none";
+  document.getElementById("username").value = "";
+  document.getElementById("password").value = "";
+}
 
-  function loadAllEntries() {
-    db.collection("tracking").orderBy("timestamp", "desc").onSnapshot(snapshot => {
-      allEntries = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          location: data.location || '-',
-          statusHistory: data.statusHistory || [],
-          estimatedDate: data.estimatedDate || '-',
-          timestamp: data.timestamp?.toDate() || null,
-        };
-      });
-      renderEntries();
-    });
-  }
+let scanner;
+function startScanner() {
+  document.getElementById("scannerContainer").style.display = "block";
+  scanner = new Html5Qrcode("scanner");
+  scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
+    (decodedText) => {
+      document.getElementById("trackNumber").value = decodedText.trim();
+      stopScanner();
+      printAndSave();
+    },
+    () => {}
+  );
+}
+function stopScanner() {
+  document.getElementById("scannerContainer").style.display = "none";
+  if (scanner) scanner.stop().then(() => scanner.clear()).catch(() => {});
+}
 
-  function renderEntries() {
-    const search = document.getElementById("searchInput").value.toUpperCase();
-    const entriesDiv = document.getElementById("entries");
-    entriesDiv.innerHTML = "";
+async function printAndSave() {
+  const number = document.getElementById("trackNumber").value.trim().toUpperCase();
+  const name = document.getElementById("parcelName").value.trim();
+  const barangay = document.getElementById("barangay").value.trim();
+  const price = document.getElementById("price").value.trim();
+  const status = document.getElementById("trackStatus").value;
+  const location = document.getElementById("trackLocation").value.trim();
+  const estimatedDate = document.getElementById("estimatedDate").value;
+  const now = firebase.firestore.Timestamp.now();
 
-    let filtered = allEntries.filter(e => e.id.includes(search));
-    const start = (currentPage - 1) * pageSize;
-    const paginated = filtered.slice(start, start + pageSize);
-    paginated.forEach(entry => {
-      const timeline = entry.statusHistory.map(h => {
-        const date = h.timestamp?.toDate().toLocaleString() || 'N/A';
-        return `- [${date}] ${h.status}`;
-      }).join("<br>");
-      entriesDiv.innerHTML += `
-        <div class='item'>
-          <div class='item-content'>
-            <strong>${entry.id}</strong><br>
-            Location: ${entry.location}<br>
-            Estimated Delivery: ${entry.estimatedDate}<br>
-            <strong>Encoded:</strong> ${entry.timestamp ? entry.timestamp.toLocaleString() : 'N/A'}<br>
-            Timeline:<div class='timeline'>${timeline}</div>
-          </div>
-          <button class='delete-btn' onclick="deleteEntry('${entry.id}')">Delete</button>
-        </div>`;
-    });
-  }
+  if (!number || !name || !barangay || !price || !status) return alert("Complete all fields");
 
-  function sameDay(d1, d2) {
-    return d1.getFullYear() === d2.getFullYear() &&
-           d1.getMonth() === d2.getMonth() &&
-           d1.getDate() === d2.getDate();
-  }
+  const docRef = db.collection("tracking").doc(number);
+  const docSnap = await docRef.get();
+  let statusHistory = docSnap.exists ? docSnap.data().statusHistory || [] : [];
+  statusHistory.push({ status, timestamp: now });
 
-  function nextPage() {
-    const search = document.getElementById("searchInput").value.toUpperCase();
-    const filtered = allEntries.filter(e => e.id.includes(search));
-    const totalPages = Math.ceil(filtered.length / pageSize);
-    if (currentPage < totalPages) currentPage++;
-    renderEntries();
-  }
+  await docRef.set({
+    parcelName: name,
+    barangay: barangay,
+    location,
+    price,
+    estimatedDate,
+    statusHistory,
+    timestamp: now
+  });
 
-  function prevPage() {
-    if (currentPage > 1) currentPage--;
-    renderEntries();
-  }
+  const logoUrl = "logo.jpg";
+  const content = `
+    <div style="width: 48mm; height: 78mm; padding: 1mm; font-size: 10pt; font-family: monospace; text-align: center;">
+      <img src="${logoUrl}" style="width: 30mm; margin-bottom: 2mm;" /><br>
+      <strong style="font-size: 11pt;">JNK Express Padala</strong><br><br>
+      <strong>${name}</strong><br>
+      Brgy: ${barangay}<br>
+      Price: ₱${price}<br>
+      Tracking #: ${number}<br>
+      <small>${new Date().toLocaleString()}</small><br><br>
+      <em>Salamat sa tiwala KA-JNK!!</em>
+    </div>`;
 
-  function exportCSVByDateRange() {
-    const fromDate = document.getElementById("exportFrom").value;
-    const toDate = document.getElementById("exportTo").value;
-    if (!fromDate || !toDate) return alert("Please select both start and end dates.");
+  const printWin = window.open('', '_blank', 'width=200,height=200');
+  printWin.document.write(`
+    <html>
+      <head>
+        <title>Print</title>
+        <style>
+          @page { size: 50mm 80mm portrait; margin: 0; }
+          body { margin: 0; width: 50mm; height: 80mm; }
+        </style>
+      </head>
+      <body onload="window.print(); window.close();">${content}</body>
+    </html>`);
+  printWin.document.close();
 
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    to.setHours(23, 59, 59, 999);
+  ["trackNumber", "parcelName", "barangay", "price", "trackStatus", "trackLocation", "estimatedDate"]
+    .forEach(id => document.getElementById(id).value = "");
 
-    const filtered = allEntries.filter(entry => {
-      const entryDate = entry.timestamp;
-      return entryDate >= from && entryDate <= to;
-    });
+  loadAllEntries();
+}
 
-    if (filtered.length === 0) {
-      alert("No entries found in selected date range.");
-      return;
-    }
-
-    const data = filtered.map(e => {
-      const status = e.statusHistory.map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ");
+function loadAllEntries() {
+  db.collection("tracking").orderBy("timestamp", "desc").onSnapshot(snapshot => {
+    allEntries = snapshot.docs.map(doc => {
+      const data = doc.data();
       return {
-        TrackingNumber: e.id,
-        Location: e.location,
-        EstimatedDelivery: e.estimatedDate,
-        StatusTimeline: status
+        id: doc.id,
+        parcelName: data.parcelName || '-',
+        barangay: data.barangay || '-',
+        location: data.location || '-',
+        price: data.price || '-',
+        statusHistory: data.statusHistory || [],
+        estimatedDate: data.estimatedDate || '-',
+        timestamp: data.timestamp?.toDate() || null,
       };
     });
+    renderEntries();
+  });
+}
 
-    const csv = Papa.unparse(data);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `tracking_export_${filtered.length}_items_${Date.now()}.csv`;
-    link.click();
-  }
+function renderEntries() {
+  const search = document.getElementById("searchInput").value.toUpperCase();
+  const entriesDiv = document.getElementById("entries");
+  entriesDiv.innerHTML = "";
+  const filtered = allEntries.filter(e => e.id.includes(search));
+  const start = (currentPage - 1) * pageSize;
+  const paginated = filtered.slice(start, start + pageSize);
+  paginated.forEach(entry => {
+    const timeline = entry.statusHistory.map(h => {
+      const date = h.timestamp?.toDate().toLocaleString() || 'N/A';
+      return `- [${date}] ${h.status}`;
+    }).join("<br>");
+    entriesDiv.innerHTML += `
+      <div class='item'>
+        <div class='item-content'>
+          <strong>${entry.id}</strong><br>
+          Name: ${entry.parcelName}<br>
+          Barangay: ${entry.barangay}<br>
+          Location: ${entry.location}<br>
+          Price: ₱${entry.price}<br>
+          Estimated Delivery: ${entry.estimatedDate}<br>
+          <strong>Encoded:</strong> ${entry.timestamp ? entry.timestamp.toLocaleString() : 'N/A'}<br>
+          Timeline:<div class='timeline'>${timeline}</div>
+        </div>
+        <button class='delete-btn' onclick="deleteEntry('${entry.id}')">Delete</button>
+      </div>`;
+  });
+}
 
-  async function bulkUpdateByTimeRange() {
-    const date = document.getElementById("bulkDate").value;
-    const start = document.getElementById("startTime").value;
-    const end = document.getElementById("endTime").value;
-    const status = document.getElementById("bulkStatus").value;
-    const location = document.getElementById("bulkLocation").value.trim();
-    if (!date || !start || !end || !status) return alert("Fill all date/time/status fields.");
-    const confirmPass = prompt("Enter admin password to apply bulk update:");
-    if (confirmPass !== PASSWORD) return alert("❌ Incorrect password.");
-    const fromDate = new Date(`${date}T${start}`);
-    const toDate = new Date(`${date}T${end}`);
-    const snapshot = await db.collection("tracking").get();
-    const batch = db.batch();
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      const entryDate = data.timestamp?.toDate();
-      if (entryDate >= fromDate && entryDate <= toDate) {
-        const history = data.statusHistory || [];
-        history.push({ status, timestamp: firebase.firestore.Timestamp.now() });
-        batch.update(doc.ref, {
-          location: location || data.location,
-          estimatedDate: data.estimatedDate || '',
-          statusHistory: history
-        });
-      }
+function nextPage() {
+  const filtered = allEntries.filter(e => e.id.includes(document.getElementById("searchInput").value.toUpperCase()));
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  if (currentPage < totalPages) currentPage++;
+  renderEntries();
+}
+
+function prevPage() {
+  if (currentPage > 1) currentPage--;
+  renderEntries();
+}
+
+function exportExcelByDateRange() {
+  const from = new Date(document.getElementById("excelFrom").value);
+  const to = new Date(document.getElementById("excelTo").value);
+  to.setHours(23, 59, 59, 999);
+
+  const filtered = allEntries.filter(entry => entry.timestamp >= from && entry.timestamp <= to);
+  if (filtered.length === 0) return alert("No entries found in selected date range.");
+
+  const data = filtered.map(e => ({
+    TrackingNumber: e.id,
+    ParcelName: e.parcelName || '-',
+    Barangay: e.barangay || '-',
+    Location: e.location,
+    Price: e.price || '-',
+    EstimatedDelivery: e.estimatedDate,
+    StatusTimeline: e.statusHistory.map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ")
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Tracking Data");
+  XLSX.writeFile(wb, `tracking_export_${filtered.length}_items_${Date.now()}.xlsx`);
+}
+
+async function deleteEntry(id) {
+  const confirmPass = prompt("Enter admin password to delete:");
+  if (confirmPass !== PASSWORD) return alert("❌ Incorrect password.");
+  await db.collection("tracking").doc(id).delete();
+  alert("Deleted.");
+  loadAllEntries();
+}
+
+async function bulkUpdateByTimeRange() {
+  const fromDateStr = document.getElementById("bulkFromDate").value;
+  const fromTimeStr = document.getElementById("bulkFromTime").value || "00:00";
+  const toDateStr = document.getElementById("bulkToDate").value;
+  const toTimeStr = document.getElementById("bulkToTime").value || "23:59";
+  const status = document.getElementById("bulkStatus").value;
+  const location = document.getElementById("bulkLocation").value.trim();
+
+  if (!fromDateStr || !toDateStr || !status) return alert("Fill all date/time and status fields.");
+  const fromDateTime = new Date(`${fromDateStr}T${fromTimeStr}`);
+  const toDateTime = new Date(`${toDateStr}T${toTimeStr}`);
+  if (toDateTime < fromDateTime) return alert("TO date/time must be after FROM date/time.");
+
+  const confirmPass = prompt("Enter admin password to apply bulk update:");
+  if (confirmPass !== PASSWORD) return alert("❌ Incorrect password.");
+
+  const fromTs = firebase.firestore.Timestamp.fromDate(fromDateTime);
+  const toTs = firebase.firestore.Timestamp.fromDate(toDateTime);
+
+  const snapshot = await db.collection("tracking")
+    .where("timestamp", ">=", fromTs)
+    .where("timestamp", "<=", toTs)
+    .get();
+
+  if (snapshot.empty) return alert("No entries found in selected range.");
+
+  const batch = db.batch();
+  snapshot.docs.forEach(doc => {
+    const data = doc.data();
+    const history = data.statusHistory || [];
+    history.push({ status, timestamp: firebase.firestore.Timestamp.now() });
+    batch.update(doc.ref, {
+      location: location || data.location,
+      estimatedDate: data.estimatedDate || '',
+      statusHistory: history
     });
-    await batch.commit();
-    alert("✅ Bulk update applied to selected date and time range.");
-    loadAllEntries();
-  }
-</script>
+  });
 
+  await batch.commit();
+  alert(`✅ Bulk update applied to ${snapshot.size} entries.`);
+  loadAllEntries();
+}
+</script>
 </body>
 </html>
