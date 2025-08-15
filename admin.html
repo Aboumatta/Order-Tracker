@@ -5,7 +5,7 @@
   <title>Admin Panel - JNK Express</title>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     body { font-family: sans-serif; background: #fff3f3; padding: 20px; max-width: 800px; margin: auto; }
@@ -33,7 +33,6 @@
 </head>
 <body>
   <h2>JNK Admin Panel</h2>
-  
   <div id="loginSection">
     <input type="text" id="username" placeholder="Username" />
     <input type="password" id="password" placeholder="Password" />
@@ -72,9 +71,9 @@
     </div>
 
     <div class="top-bar">
-      <input type="date" id="excelFrom" />
-      <input type="date" id="excelTo" />
-      <button onclick="exportExcelByDateRange()">📊 Export Excel by Date</button>
+      <input type="date" id="exportFrom" />
+      <input type="date" id="exportTo" />
+      <button onclick="exportCSVByDateRange()">Export CSV by Date</button>
     </div>
 
     <div class="top-bar">
@@ -101,10 +100,6 @@
     </div>
   </div>
 
-  <div id="receiptArea">
-    <div id="receiptContent" style="font-family:monospace; font-size:10pt;"></div>
-  </div>
-
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyAnrNfuTSRAKUS2tAU4AUUrauw_QzszCjY",
@@ -127,8 +122,8 @@ function login() {
   const user = document.getElementById("username").value;
   const pass = document.getElementById("password").value;
   if (user === USERNAME && pass === PASSWORD) {
-    document.getElementById("loginSection").style.display = "none";
     document.getElementById("adminSection").style.display = "block";
+    document.getElementById("loginSection").style.display = "none";
     loadAllEntries();
   } else {
     document.getElementById("loginMessage").innerText = "Invalid login.";
@@ -136,10 +131,8 @@ function login() {
 }
 
 function logout() {
-  document.getElementById("loginSection").style.display = "block";
   document.getElementById("adminSection").style.display = "none";
-  document.getElementById("username").value = "";
-  document.getElementById("password").value = "";
+  document.getElementById("loginSection").style.display = "block";
 }
 
 let scanner;
@@ -158,6 +151,37 @@ function startScanner() {
 function stopScanner() {
   document.getElementById("scannerContainer").style.display = "none";
   if (scanner) scanner.stop().then(() => scanner.clear()).catch(() => {});
+}
+
+async function saveTracking() {
+  const number = document.getElementById("trackNumber").value.trim().toUpperCase();
+  const name = document.getElementById("parcelName").value.trim();
+  const barangay = document.getElementById("barangay").value.trim();
+  const price = document.getElementById("price").value.trim();
+  const status = document.getElementById("trackStatus").value;
+  const location = document.getElementById("trackLocation").value.trim();
+  const estimatedDate = document.getElementById("estimatedDate").value;
+  const now = firebase.firestore.Timestamp.now();
+
+  if (!number || !name || !barangay || !price || !status) return alert("Complete all fields");
+
+  const docRef = db.collection("tracking").doc(number);
+  const docSnap = await docRef.get();
+  let statusHistory = docSnap.exists ? docSnap.data().statusHistory || [] : [];
+  statusHistory.push({ status, timestamp: now });
+
+  await docRef.set({
+    parcelName: name,
+    barangay: barangay,
+    price: price,
+    location,
+    estimatedDate,
+    statusHistory,
+    timestamp: now
+  });
+
+  ["trackNumber", "parcelName", "barangay", "price", "trackStatus", "trackLocation", "estimatedDate"]
+    .forEach(id => document.getElementById(id).value = "");
 }
 
 async function printAndSave() {
@@ -180,8 +204,8 @@ async function printAndSave() {
   await docRef.set({
     parcelName: name,
     barangay: barangay,
+    price: price,
     location,
-    price,
     estimatedDate,
     statusHistory,
     timestamp: now
@@ -202,16 +226,10 @@ async function printAndSave() {
 
   const printWin = window.open('', '_blank', 'width=200,height=200');
   printWin.document.write(`
-    <html>
-      <head>
-        <title>Print</title>
-        <style>
-          @page { size: 50mm 80mm portrait; margin: 0; }
-          body { margin: 0; width: 50mm; height: 80mm; }
-        </style>
-      </head>
-      <body onload="window.print(); window.close();">${content}</body>
-    </html>`);
+    <html><head><title>Print</title>
+      <style>@page{size:50mm 80mm;margin:0;}body{margin:0;width:50mm;height:80mm;}</style>
+    </head>
+    <body onload="window.print(); window.close();">${content}</body></html>`);
   printWin.document.close();
 
   ["trackNumber", "parcelName", "barangay", "price", "trackStatus", "trackLocation", "estimatedDate"]
@@ -228,8 +246,8 @@ function loadAllEntries() {
         id: doc.id,
         parcelName: data.parcelName || '-',
         barangay: data.barangay || '-',
-        location: data.location || '-',
         price: data.price || '-',
+        location: data.location || '-',
         statusHistory: data.statusHistory || [],
         estimatedDate: data.estimatedDate || '-',
         timestamp: data.timestamp?.toDate() || null,
@@ -255,10 +273,10 @@ function renderEntries() {
       <div class='item'>
         <div class='item-content'>
           <strong>${entry.id}</strong><br>
-          Name: ${entry.parcelName}<br>
+          Parcel: ${entry.parcelName}<br>
           Barangay: ${entry.barangay}<br>
-          Location: ${entry.location}<br>
           Price: ₱${entry.price}<br>
+          Location: ${entry.location}<br>
           Estimated Delivery: ${entry.estimatedDate}<br>
           <strong>Encoded:</strong> ${entry.timestamp ? entry.timestamp.toLocaleString() : 'N/A'}<br>
           Timeline:<div class='timeline'>${timeline}</div>
@@ -268,40 +286,30 @@ function renderEntries() {
   });
 }
 
-function nextPage() {
-  const filtered = allEntries.filter(e => e.id.includes(document.getElementById("searchInput").value.toUpperCase()));
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  if (currentPage < totalPages) currentPage++;
-  renderEntries();
-}
-
-function prevPage() {
-  if (currentPage > 1) currentPage--;
-  renderEntries();
-}
-
-function exportExcelByDateRange() {
-  const from = new Date(document.getElementById("excelFrom").value);
-  const to = new Date(document.getElementById("excelTo").value);
+function exportCSVByDateRange() {
+  const from = new Date(document.getElementById("exportFrom").value);
+  const to = new Date(document.getElementById("exportTo").value);
   to.setHours(23, 59, 59, 999);
-
   const filtered = allEntries.filter(entry => entry.timestamp >= from && entry.timestamp <= to);
   if (filtered.length === 0) return alert("No entries found in selected date range.");
-
-  const data = filtered.map(e => ({
-    TrackingNumber: e.id,
-    ParcelName: e.parcelName || '-',
-    Barangay: e.barangay || '-',
-    Location: e.location,
-    Price: e.price || '-',
-    EstimatedDelivery: e.estimatedDate,
-    StatusTimeline: e.statusHistory.map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ")
-  }));
-
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Tracking Data");
-  XLSX.writeFile(wb, `tracking_export_${filtered.length}_items_${Date.now()}.xlsx`);
+  const data = filtered.map(e => {
+    const status = e.statusHistory.map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ");
+    return {
+      TrackingNumber: e.id,
+      ParcelName: e.parcelName,
+      Barangay: e.barangay,
+      Price: e.price,
+      Location: e.location,
+      EstimatedDelivery: e.estimatedDate,
+      StatusTimeline: status
+    };
+  });
+  const csv = Papa.unparse(data);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `tracking_export_${filtered.length}_items_${Date.now()}.csv`;
+  link.click();
 }
 
 async function deleteEntry(id) {
