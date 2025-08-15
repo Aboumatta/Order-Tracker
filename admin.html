@@ -189,8 +189,8 @@ function renderEntries() {
   const start = (currentPage - 1) * pageSize;
   filtered.slice(start, start + pageSize).forEach(entry => {
     const timeline = (entry.statusHistory || []).map(h => `[${h.timestamp?.toDate().toLocaleString() || 'N/A'}] ${h.status}`).join("<br>");
-    entriesDiv.innerHTML += `
-      <div class="item">
+    entriesDiv.innerHTML += 
+      `<div class="item">
         <div class="item-content">
           <strong>${entry.id}</strong><br>
           Parcel: ${entry.parcelName || ''}<br>
@@ -214,36 +214,33 @@ function prevPage() { if (currentPage > 1) currentPage--; renderEntries(); }
 
 function exportExcelByDateRange() {
   const from = new Date(document.getElementById("exportFrom").value);
-  const to = new Date(document.getElementById("exportTo").value); to.setHours(23, 59, 59, 999);
+  const to = new Date(document.getElementById("exportTo").value);
+  to.setHours(23, 59, 59, 999);
   const filtered = allEntries.filter(e => e.timestamp && e.timestamp >= from && e.timestamp <= to);
+  if (!filtered.length) return alert("No entries found in that date range");
   const data = filtered.map(e => ({
     TrackingNumber: e.id,
     ParcelName: e.parcelName || '',
     Barangay: e.barangay || '',
-    Price: e.price || '',
-    Location: e.location || '',
-    EstimatedDelivery: e.estimatedDate || '',
-    EncodedAt: e.timestamp ? e.timestamp.toLocaleString() : '',
-    StatusTimeline: (e.statusHistory || []).map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ")
+    Price: e.price || ''
   }));
-  const ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tracking Data");
-  XLSX.writeFile(wb, `tracking_export.xlsx`);
+  XLSX.writeFile(wb, `tracking_export_${filtered.length}_items.xlsx`);
 }
 
 function exportSingleToExcel(id) {
   const e = allEntries.find(x => x.id === id);
+  if (!e) return alert("Entry not found");
   const data = [{
     TrackingNumber: e.id,
     ParcelName: e.parcelName || '',
     Barangay: e.barangay || '',
-    Price: e.price || '',
-    Location: e.location || '',
-    EstimatedDelivery: e.estimatedDate || '',
-    EncodedAt: e.timestamp ? e.timestamp.toLocaleString() : '',
-    StatusTimeline: (e.statusHistory || []).map(s => `${s.timestamp?.toDate().toLocaleString()} - ${s.status}`).join(" | ")
+    Price: e.price || ''
   }];
-  const ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tracking Entry");
   XLSX.writeFile(wb, `tracking_${id}.xlsx`);
 }
